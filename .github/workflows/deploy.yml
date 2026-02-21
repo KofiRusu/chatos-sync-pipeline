@@ -12,7 +12,7 @@ on:
         default: true
       ref:
         description: "Git ref to deploy (branch name)"
-        default: "main"
+        default: "2.3-10.02-commit"
 
 concurrency:
   group: deploy-main
@@ -44,7 +44,7 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           DEPLOY_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || secrets.DEPLOY_DRY_RUN }}
-          DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || 'main' }}
+          DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || '2.3-10.02-commit' }}
           PIPELINE_PATH: /opt/chatos-sync-pipeline
         run: |
           set -euo pipefail

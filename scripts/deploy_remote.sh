@@ -93,8 +93,9 @@ healthcheck_path="${script_dir}/healthcheck.sh"
 
 DEPLOY_PATH="${DEPLOY_PATH:-/data/ChatOS}"
 DEPLOY_DRY_RUN="${DEPLOY_DRY_RUN:-}"
-DEPLOY_REF_RAW="${DEPLOY_REF:-main}"
+DEPLOY_REF_RAW="${DEPLOY_REF:-2.3-10.02-commit}"
 DEPLOY_REF="${DEPLOY_REF_RAW#refs/heads/}"
+ALLOW_BRANCH_SWITCH="${ALLOW_BRANCH_SWITCH:-}"
 
 summary_exit_code=0
 summary_old_head="unknown"
@@ -145,6 +146,8 @@ fi
 require_cmd git
 require_cmd flock
 
+export GIT_TERMINAL_PROMPT=0
+
 if [ ! -d "$DEPLOY_PATH" ]; then
   log "DEPLOY_PATH does not exist: $DEPLOY_PATH"
   exit 1
@@ -186,17 +189,65 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 current_branch="$(git rev-parse --abbrev-ref HEAD)"
-if [ "$current_branch" != "$DEPLOY_REF" ]; then
-  log "Refusing to deploy from non-target branch: ${current_branch} (expected ${DEPLOY_REF})"
-  exit 1
-fi
 
 if [ -n "$(git status --porcelain)" ]; then
   log "Working tree is not clean; resolve local changes before deploy."
   exit 1
 fi
 
+if [ "$current_branch" != "$DEPLOY_REF" ]; then
+  if is_true "$ALLOW_BRANCH_SWITCH"; then
+    if is_true "$DEPLOY_DRY_RUN"; then
+      log "Dry-run: would switch from ${current_branch} to ${DEPLOY_REF} (ALLOW_BRANCH_SWITCH=true)."
+    else
+      log "Switching branch from ${current_branch} to ${DEPLOY_REF}."
+      git fetch --prune origin "${DEPLOY_REF}"
+      if git show-ref --verify --quiet "refs/heads/${DEPLOY_REF}"; then
+        git checkout "${DEPLOY_REF}"
+      else
+        git checkout -B "${DEPLOY_REF}" "origin/${DEPLOY_REF}"
+      fi
+      current_branch="$(git rev-parse --abbrev-ref HEAD)"
+      if [ "$current_branch" != "$DEPLOY_REF" ]; then
+        log "Failed to switch to target branch: ${DEPLOY_REF}."
+        exit 1
+      fi
+    fi
+  else
+    log "Refusing to deploy from non-target branch: ${current_branch} (expected ${DEPLOY_REF})"
+    exit 1
+  fi
+fi
+
 ensure_safe_env
+
+old_head="$(git rev-parse HEAD)"
+summary_old_head="$old_head"
+summary_new_head="$old_head"
+log "Current branch: ${current_branch}"
+log "Current HEAD: ${old_head}"
+log "Target branch: ${DEPLOY_REF}"
+
+if is_true "$DEPLOY_DRY_RUN"; then
+  log "Dry-run mode enabled."
+  log "Planned: fetch origin/${DEPLOY_REF} and fast-forward if needed."
+
+  if is_true "${ALLOW_DB_MIGRATIONS:-}"; then
+    summary_migrations="planned"
+    log "Planned: run alembic upgrade head (ALLOW_DB_MIGRATIONS=true)."
+  fi
+
+  summary_remote_head="not-fetched"
+  summary_updated="unknown"
+  summary_backend_restart="planned"
+  summary_frontend_restart="planned"
+  summary_healthcheck="planned"
+
+  log "Planned: restart backend (systemd or docker compose) if updated or migrations ran."
+  log "Planned: restart frontend if detected."
+  log "Planned: run healthchecks."
+  exit 0
+fi
 
 lock_file="${DEPLOY_PATH}/.deploy.lock"
 exec 9>"$lock_file"
@@ -204,12 +255,6 @@ if ! flock -n 9; then
   log "Another deploy is in progress; exiting."
   exit 1
 fi
-
-export GIT_TERMINAL_PROMPT=0
-
-old_head="$(git rev-parse HEAD)"
-summary_old_head="$old_head"
-log "Current HEAD: ${old_head}"
 
 log "Fetching origin/${DEPLOY_REF}"
 git fetch --prune origin "${DEPLOY_REF}"
@@ -222,23 +267,6 @@ if [ "$old_head" != "$remote_head" ]; then
   updated="true"
 fi
 summary_updated="$updated"
-
-if is_true "$DEPLOY_DRY_RUN"; then
-  log "Dry-run mode enabled."
-  if [ "$updated" = "true" ]; then
-    log "Would fast-forward from ${old_head} to ${remote_head}."
-  else
-    log "No git changes detected."
-  fi
-
-  if is_true "${ALLOW_DB_MIGRATIONS:-}"; then
-    log "Would run alembic upgrade head (ALLOW_DB_MIGRATIONS=true)."
-  fi
-
-  log "Skipping restarts and healthchecks due to dry-run."
-  summary_new_head="$old_head"
-  exit 0
-fi
 
 if [ "$updated" = "true" ]; then
   log "Fast-forwarding to ${remote_head}"
