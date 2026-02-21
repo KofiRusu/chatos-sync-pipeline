@@ -1,0 +1,7 @@
+.env
+.env.*
+*.log
+.DS_Store
+EVIDENCE.md
+REPORT.md
+STATUS.json
