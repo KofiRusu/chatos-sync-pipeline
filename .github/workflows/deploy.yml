@@ -1,39 +1,32 @@
 name: Deploy
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "Run without restarts (dry-run)"
-        type: boolean
-        default: true
       ref:
-        description: "Git ref to deploy (branch name)"
-        default: "2.3-10.02-commit"
+        description: "ChatOS branch to deploy"
+        required: true
+        default: 2.3-10.02-commit
+      dry_run:
+        description: "If true, do not restart services / only print plan"
+        required: true
+        default: true
+        type: boolean
 
 concurrency:
-  group: deploy-main
+  group: deploy-manual
   cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: [self-hosted, linux, x64]
     steps:
-      - name: Ensure deploy script is executable
-        shell: bash
-        run: |
-          set -euo pipefail
-          chmod +x /opt/chatos-sync-pipeline/scripts/deploy_remote.sh
-
       - name: Deploy locally
         shell: bash
         env:
           DEPLOY_PATH: /data/ChatOS
-          DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || '2.3-10.02-commit' }}
-          DEPLOY_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+          DEPLOY_REF: ${{ inputs.ref }}
+          DEPLOY_DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
           output_file="/tmp/deploy_output.log"
